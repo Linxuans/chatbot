@@ -363,6 +363,33 @@ def _check_sqlite(cfg: Settings) -> Check:
     return Check("SQLite", "ok", sqlite3.sqlite_version)
 
 
+def _check_api_call(cfg: Settings, llm=None) -> Check:
+    """真发一次最小请求，确认 Key 有效、模型名可用。"""
+    if not cfg.api_key:
+        return Check("模型调用实测", "fail", "没有 API Key", "先在 .env 里填 DEEPSEEK_API_KEY")
+
+    if llm is None:
+        try:
+            from .llm import LLM
+
+            llm = LLM(cfg)
+        except Exception as exc:  # pragma: no cover - 依赖缺失
+            return Check("模型调用实测", "fail", f"初始化失败: {exc}", "检查 requirements.txt 是否装全")
+
+    try:
+        reply = llm.chat(
+            [{"role": "user", "content": "只回复两个字：正常"}],
+            temperature=0.0,
+            max_tokens=16,
+            timeout=30.0,
+            retries=0,
+        )
+    except Exception as exc:
+        return Check("模型调用实测", "fail", str(exc)[:160], "检查 Key 是否有效、余额是否充足、模型名是否正确")
+
+    return Check("模型调用实测", "ok", f"{cfg.model} 回复：{reply.strip()[:40]}")
+
+
 def _check_network() -> Check:
     if _reachable("api.deepseek.com"):
         return Check("模型接口连通", "ok", "api.deepseek.com:443")
@@ -382,6 +409,8 @@ def run_doctor(cfg: Settings, need_gateway: bool = True) -> int:
     checks.append(_check_storage(cfg))
     checks.append(_check_sqlite(cfg))
     checks.append(_check_network())
+    if cfg.check_api:
+        checks.append(_check_api_call(cfg))
     if need_gateway:
         checks += _check_wechat()
         checks.append(_check_port(cfg))

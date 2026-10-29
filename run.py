@@ -132,9 +132,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=sorted(MODES), help="运行模式，默认取 .env 的 MODE")
     parser.add_argument("--env", help="指定 .env 文件路径")
     parser.add_argument("--core-url", help="gateway 模式下核心地址，覆盖 CORE_URL")
+    parser.add_argument(
+        "--check-api",
+        action="store_true",
+        help="搭配 --mode doctor：真发一次模型请求，验证 Key 与模型名",
+    )
     args = parser.parse_args(argv)
 
     cfg = Settings.load(args.env)
+    cfg.check_api = bool(args.check_api)
     if args.core_url:
         cfg.core_url = args.core_url.rstrip("/")
     setup_logging(cfg.log_level, cfg.log_file)

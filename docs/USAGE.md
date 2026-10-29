@@ -79,6 +79,14 @@ cd F:\work\api
 
 **只处理 `[FAIL]`，`[WARN]` 可以带着跑。** 每一项后面 `->` 就是动作。
 
+填好 Key 后再跑一次，加上 `--check-api`，它会真发一次最小请求，验证 Key 有效、模型名拼对、余额够：
+
+```powershell
+.\.venv\Scripts\python.exe run.py --mode doctor --check-api
+```
+
+**你应该看到**：`[ OK ] 模型调用实测  deepseek-chat 回复：正常`
+
 ---
 
 ## 2. 准备微信客户端
@@ -111,24 +119,29 @@ cd F:\work\api
 
 1. 下载 3.9.12.17 安装包：
    <https://github.com/tom-snow/wechat-windows-versions/releases/tag/v3.9.12.17>
-2. 装到**独立目录**（例如 `E:\weichat\WeChat39`），不要覆盖你现有的 4.x。
-3. 先别登录，打开 3.9 的「设置 → 通用设置」，**取消勾选自动更新**。
+
+   可选校验：SHA256 应为 `4985f96235154fc4176e3972f14709f5f10fc0606e5589075a6da9b6dc7fccd3`，
+   数字签名应为 `Tencent Technology (Shenzhen) Company Limited`。
+2. 双击安装，**用默认路径 `C:\Program Files\Tencent\WeChat` 就行**。
+3. 装完**先别登录**，打开 3.9 的「设置 → 通用设置」，取消勾选自动更新。
 4. 用**机器人小号**登录 3.9；4.x 那边继续用你的主号。
-5. 跑 `run.py --mode doctor`，确认这一行：
+5. `run.py --mode doctor` 应出现：
 
    ```
    [ OK ] 版本匹配            微信 3.9.12.17 = DLL 目标 3.9.12.17
    ```
 
-**如果 3.9.12.17 登录时提示「版本过低」**，说明腾讯已经封了这个构建。改用另一组已验证的配对：
+> **安装器的坑（实测）**：WeChat 3.9 的安装器会**忽略 `/D=` 参数，也会覆盖注册表里的 InstallPath**，强制装到 `C:\Program Files\Tencent\WeChat`。想把目录放别的盘，只能装完后用管理员权限搬走，不建议折腾——它和 4.x 的 `E:\weichat\Weixin` 本来就不冲突。
+
+**如果 3.9.12.17 登录时提示「版本过低」**，说明腾讯已封掉该构建。改用另一组已验证的配对：
 
 - 微信 `3.9.12.51` + `wcferry==39.5.2.0`
 
-改 `requirements-gateway.txt` 里那一行，然后重装：
+改 `requirements-gateway.txt` 里那一行后重装：
 
 ```powershell
-.\.venv\Scripts\\python.exe -m pip install --upgrade wcferry==39.5.2.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
-.\.venv\Scripts\\python.exe run.py --mode doctor
+.\.venv\Scripts\python.exe -m pip install --upgrade wcferry==39.5.2.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+.\.venv\Scripts\python.exe run.py --mode doctor
 ```
 
 ---

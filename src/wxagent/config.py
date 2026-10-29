@@ -95,6 +95,8 @@ class Settings:
     # ---- 存储与日志 ----
     db_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "bot.db")
     log_level: str = "INFO"
+    # 仅由 --check-api 命令行开关设置，不进 .env
+    check_api: bool = False
     log_file: str = ""
 
     # ---- 部署 ----

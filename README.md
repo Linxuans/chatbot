@@ -52,7 +52,7 @@
 | Python | 3.10+（本项目在 3.12 上验证） |
 | 模型 | DeepSeek API Key（https://platform.deepseek.com/api_keys ） |
 
-> **只有 4.x 也没关系**：3.9 与 4.x 可以同时安装、同时运行，分别登录不同账号。把 3.9.12.17 装到独立目录（如 `E:\weichat\WeChat39`），用小号登录它，4.x 继续用主号。两个客户端都要关掉自动更新。详见 [USAGE.md 2.4](docs/USAGE.md)。
+> **只有 4.x 也没关系**：3.9 与 4.x 可以同时安装、同时运行，分别登录不同账号。3.9.12.17 装到默认路径 `C:\Program Files\Tencent\WeChat` 即可（该安装器会忽略自定义目录），用小号登录它，4.x 继续用主号。两个客户端都要关掉自动更新。详见 [USAGE.md 2.4](docs/USAGE.md)。
 
 ### 1. 装依赖
 
@@ -87,6 +87,12 @@ BOT_NAMES=小助手
 它会检查：Python/依赖、`.env` 与 API Key、数据目录、模型接口连通性、**微信版本与注入 DLL 是否配对**、wcferry 端口占用。
 
 有 `[FAIL]` 就先按 `->` 后面的提示修掉；`[WARN]` 可以继续但要知道原因。
+
+填完 Key 后加 `--check-api` 可真实调用一次模型，验证 Key 与模型名：
+
+```powershell
+.\.venv\Scripts\python.exe run.py --mode doctor --check-api
+```
 
 ### 4. 先校准 @ 识别（强烈建议）
 
