@@ -97,6 +97,8 @@ class Settings:
     log_level: str = "INFO"
     # 仅由 --check-api 命令行开关设置，不进 .env
     check_api: bool = False
+    # 允许模型调用 web_search 联网
+    enable_web_search: bool = True
     log_file: str = ""
 
     # ---- 部署 ----
@@ -146,6 +148,7 @@ class Settings:
             core_port=_i("CORE_PORT", 8000),
             gateway_token=_s("GATEWAY_TOKEN"),
             uia_poll_interval=_f("UIA_POLL_INTERVAL", 3.0),
+            enable_web_search=_b("ENABLE_WEB_SEARCH", True),
             wcf_port=_i("WCF_PORT", 10086),
             wcf_debug=_b("WCF_DEBUG", False),
         )

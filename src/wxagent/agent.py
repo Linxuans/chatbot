@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -17,6 +18,7 @@ from .memory import Memory
 from .pipeline import Cooldown, clean_text, detect_trigger, sanitize_reply, split_reply
 from .prompt import build_system, build_user
 from .store import Store
+from .tools import TOOLS, run_tool
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +134,7 @@ class AgentService:
             return []
 
         try:
-            raw = self.llm.chat(
+            raw = self._ask(
                 [
                     {"role": "system", "content": build_system(self.cfg, self.bot_name)},
                     {
@@ -162,6 +164,66 @@ class AgentService:
         replies = self._build_replies(msg, text)
         self._summarize_async(msg.chat_id)
         return replies
+
+    # ---------------------------------------------------------------- 模型
+    MAX_TOOL_ROUNDS = 2
+
+    def _ask(self, messages: list[dict]) -> str:
+        """调用模型；开了联网就让模型自己决定要不要先搜索。"""
+        if not self.cfg.enable_web_search:
+            return self.llm.chat(messages)
+
+        used_tools = False
+        message = self.llm.chat_message(messages, tools=TOOLS)
+        for _ in range(self.MAX_TOOL_ROUNDS):
+            calls = message.get("tool_calls") or []
+            if not calls:
+                break
+            used_tools = True
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.get("content") or "",
+                    "tool_calls": calls,
+                }
+            )
+            for call in calls:
+                function = call.get("function") or {}
+                name = function.get("name") or ""
+                try:
+                    arguments = json.loads(function.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    arguments = {}
+                log.info("调用工具 %s %s", name, arguments)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id") or "",
+                        "content": run_tool(name, arguments),
+                    }
+                )
+            message = self.llm.chat_message(messages, tools=TOOLS)
+
+        text = (message.get("content") or "").strip()
+
+        # 用过工具时再补一次「总结式回答」：
+        # 否则模型可能停在思考中途（实测会吐出 "Let me try another query." 这种碎片），
+        # 而且容易切成英文。
+        if used_tools:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "请根据以上搜索结果，用中文直接回答我最初的问题。"
+                        "不要再提搜索过程，不要再说要继续查，信息不足就直说不足。"
+                    ),
+                }
+            )
+            text = self.llm.chat(messages).strip()
+
+        if not text:
+            text = (message.get("reasoning_content") or "").strip()
+        return text
 
     # ---------------------------------------------------------------- 命令
     def _handle_command(self, msg: IncomingMessage, body: str) -> str | None:

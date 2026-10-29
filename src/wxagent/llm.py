@@ -2,6 +2,7 @@
 """DeepSeek / 任意 OpenAI 兼容接口的极简客户端。
 
 不引入 openai SDK：只要 httpx，镜像小、依赖少、出错信息自己可控。
+支持 function calling（工具调用），用于联网搜索。
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ class _Retryable(Exception):
     pass
 
 
-def _extract(data: dict) -> str:
+def _extract_text(data: dict) -> str:
     try:
         choice = data["choices"][0]
     except (KeyError, IndexError, TypeError) as exc:
@@ -35,7 +36,7 @@ def _extract(data: dict) -> str:
     content = message.get("content")
     if content:
         return str(content).strip()
-    # deepseek-reasoner 在思考模式下可能把正文放在 reasoning_content
+    # 推理模型在思考阶段可能把正文放在 reasoning_content
     reasoning = message.get("reasoning_content")
     if reasoning:
         return str(reasoning).strip()
@@ -62,42 +63,22 @@ class LLM:
             return base
         return f"{base}/chat/completions"
 
-    def chat(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        timeout: float | None = None,
-        retries: int = 2,
-    ) -> str:
+    # ---------------------------------------------------------------- 底层
+    def _post(self, payload: dict, *, timeout: float | None, retries: int) -> dict:
         if not self.cfg.api_key:
             raise LLMError("DEEPSEEK_API_KEY 未配置")
-
-        payload = {
-            "model": self.cfg.model,
-            "messages": messages,
-            "temperature": self.cfg.temperature if temperature is None else temperature,
-            "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
-            "stream": False,
-        }
 
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             try:
                 resp = self._client.post(
-                    self.endpoint,
-                    json=payload,
-                    timeout=timeout or self.cfg.timeout,
+                    self.endpoint, json=payload, timeout=timeout or self.cfg.timeout
                 )
                 if resp.status_code in RETRYABLE_STATUS:
                     raise _Retryable(f"HTTP {resp.status_code}: {resp.text[:200]}")
                 if resp.status_code >= 400:
                     raise LLMError(f"模型接口返回 {resp.status_code}: {resp.text[:300]}")
-                text = _extract(resp.json())
-                if not text:
-                    raise _Retryable("模型返回空内容")
-                return text
+                return resp.json()
             except (httpx.HTTPError, _Retryable) as exc:
                 last_error = exc
                 if attempt < retries:
@@ -110,6 +91,61 @@ class LLM:
                 raise
 
         raise LLMError(f"模型调用失败: {last_error}")
+
+    def _payload(self, messages, temperature, max_tokens, tools) -> dict:
+        payload = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "temperature": self.cfg.temperature if temperature is None else temperature,
+            "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        return payload
+
+    # ---------------------------------------------------------------- 对外
+    def chat(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+        retries: int = 2,
+    ) -> str:
+        """只要最终文本。"""
+        data = self._post(
+            self._payload(messages, temperature, max_tokens, None),
+            timeout=timeout,
+            retries=retries,
+        )
+        text = _extract_text(data)
+        if not text:
+            raise LLMError("模型返回空内容")
+        return text
+
+    def chat_message(
+        self,
+        messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+        retries: int = 1,
+    ) -> dict:
+        """返回原始 assistant 消息（可能带 tool_calls）。"""
+        data = self._post(
+            self._payload(messages, temperature, max_tokens, tools),
+            timeout=timeout,
+            retries=retries,
+        )
+        try:
+            return data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError(f"接口返回结构异常: {str(data)[:300]}") from exc
 
     def close(self) -> None:
         self._client.close()
