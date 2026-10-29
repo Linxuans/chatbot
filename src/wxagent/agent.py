@@ -167,6 +167,9 @@ class AgentService:
 
     # ---------------------------------------------------------------- 模型
     MAX_TOOL_ROUNDS = 2
+    # 单条消息最多调几次工具 / 最多花多久，防止模型反复搜索把回复拖没
+    MAX_TOOL_CALLS = 3
+    MAX_TOOL_SECONDS = 20.0
 
     def _ask(self, messages: list[dict]) -> str:
         """调用模型；开了联网就让模型自己决定要不要先搜索。"""
@@ -174,10 +177,17 @@ class AgentService:
             return self.llm.chat(messages)
 
         used_tools = False
+        tool_calls_used = 0
+        started = time.time()
         message = self.llm.chat_message(messages, tools=TOOLS)
         for _ in range(self.MAX_TOOL_ROUNDS):
             calls = message.get("tool_calls") or []
             if not calls:
+                break
+            if tool_calls_used >= self.MAX_TOOL_CALLS or time.time() - started > self.MAX_TOOL_SECONDS:
+                log.info("已达工具预算（%d 次 / %.0fs），直接收尾", tool_calls_used,
+                         time.time() - started)
+                used_tools = True
                 break
             used_tools = True
             messages.append(
@@ -187,7 +197,8 @@ class AgentService:
                     "tool_calls": calls,
                 }
             )
-            for call in calls:
+            for call in calls[: max(1, self.MAX_TOOL_CALLS - tool_calls_used)]:
+                tool_calls_used += 1
                 function = call.get("function") or {}
                 name = function.get("name") or ""
                 try:

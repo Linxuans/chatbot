@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import logging
 import sys
 from pathlib import Path
@@ -27,6 +28,16 @@ log = logging.getLogger("wxagent.run")
 def _warn(cfg: Settings) -> None:
     for issue in cfg.problems():
         log.warning("配置提醒: %s", issue)
+
+
+def _acquire_single_instance(name: str = "wxagent-uia-gateway"):
+    """同一时间只允许一个微信网关实例，否则两个进程会互相点击同一个会话。"""
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, name)
+    ERROR_ALREADY_EXISTS = 183
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        return None
+    return handle
 
 
 def _build_service(cfg: Settings) -> AgentService:
@@ -92,6 +103,10 @@ def run_core(cfg: Settings) -> None:
 def run_uia(cfg: Settings) -> None:
     """微信 4.x 界面自动化模式（不注入，依赖无障碍控件树）。"""
     from wxagent.gateway.uia_gw import UiaGateway
+
+    lock = _acquire_single_instance()
+    if lock is None:
+        raise SystemExit("已经有一个微信网关在运行了。先关掉它（或用任务管理器结束 python 进程）再启动。")
 
     service = _build_service(cfg)
     gateway = UiaGateway(
