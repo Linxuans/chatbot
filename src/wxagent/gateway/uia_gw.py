@@ -7,20 +7,16 @@
 实测界面事实（微信 4.1.15.56）：
 - 会话列表  [ListControl] name='会话' class='mmui::XTableView'
             子项 [ListItemControl] class='mmui::ChatSessionCell'
-            名字 = "会话名\n未读数或摘要\n时间"
+            名字 = "会话名\n[7条] \n[有人@我]\n某人: 内容\n时间"
 - 消息列表  [ListControl] name='消息' class='mmui::RecyclerListView'
             文本消息 [ListItemControl] class='mmui::ChatTextItemView'，正文就是 Name
 - 输入框    [EditControl] class='mmui::ChatInputField'
 - 发送按钮  [ButtonControl] name='发送' class='mmui::XOutlineButton'
 
-三条工程约束及对策：
-1. 微信重启后 gate 失效 -> 每轮检测进程/窗口，自动重新 attach
-2. 窗口最小化后读不到 -> 自动还原（不抢焦点，除非真要点击）
-3. 打开会话会标记已读 -> 用会话摘要判断 @，不碰未读数，只有真 @ 才开会话
+行为约定：**只有被 @ 才回复**（微信的「有人@我」标记，或消息里出现 @机器人）。
 """
 from __future__ import annotations
 
-import ctypes
 import logging
 import re
 import time
@@ -59,18 +55,11 @@ class SessionInfo:
 
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
 _COUNT_RE = re.compile(r"^\[(\d+)条\]\s*(.*)$")
-# 微信在会话行里插入的各种标记，不是消息内容
 _MARKERS = {"[有人@我]", "消息免打扰", "[草稿]", "[未读]", "[语音]", "[图片]"}
 
 
 def parse_session_name(raw: str) -> SessionInfo:
-    """解析会话列表项的 Name。
-
-    实测格式（字段数不固定）：
-        浮三生、再睡一夏夏\n[7条] \n[有人@我]\n再睡一夏夏: @城南 在\n23:57
-        文件传输助手\n\n
-        腾讯新闻\n[3条] \n摘要...\n23:29
-    """
+    """解析会话列表项的 Name（字段数不固定）。"""
     raw = raw or ""
     parts = [p.strip() for p in raw.split("\n") if p.strip()]
     title = parts[0] if parts else ""
@@ -96,7 +85,6 @@ def parse_session_name(raw: str) -> SessionInfo:
             continue
         candidates.append(part)
 
-    # 摘要取最后一个候选：微信把最新一条消息放在时间之前
     summary = candidates[-1] if candidates else ""
     return SessionInfo(
         title=title,
@@ -170,7 +158,6 @@ class UiaGateway(BaseGateway):
         return True
 
     def _ensure_ready(self) -> bool:
-        """保证：gate 开着 + 窗口还在 + 窗口可读。"""
         if not self._gate.ensure():
             return False
         found = find_wechat_window()
@@ -195,12 +182,14 @@ class UiaGateway(BaseGateway):
     def _prune_baseline(self) -> None:
         """记录当前会话摘要，避免启动时回复历史消息。
 
-        例外：带「有人@我」标记且未读的会话不记基线——那是明确找过机器人、
+        例外：摘要里明确 @ 了机器人，或带「有人@我」且有未读——那是找过机器人
         但还没被回复的消息，启动后应当补上。
         """
         for session in self._sessions():
-            if session.at_me and session.unread > 0:
-                log.info("启动时发现未回复的 @ 会话: %s（未读 %d）", session.title, session.unread)
+            mentioned = contains_mention(session.summary, self.bot_names)
+            if mentioned or (session.at_me and session.unread > 0):
+                log.info("启动时发现待回复的 @ 会话: %s（摘要=%r）",
+                         session.title, session.summary[:40])
                 continue
             self._last_summary.setdefault(session.title, session.summary)
 
@@ -208,7 +197,7 @@ class UiaGateway(BaseGateway):
         if self._window is None:
             self.start()
         self._running = True
-        log.info("开始监听微信消息…（每 %.1fs 轮询一次）", self.poll_interval)
+        log.info("开始监听微信消息…（每 %.1fs 轮询一次，只有 @ 才回复）", self.poll_interval)
         while self._running:
             try:
                 if self._ensure_ready():
@@ -232,7 +221,9 @@ class UiaGateway(BaseGateway):
                 continue
             self._last_summary[session.title] = session.summary
 
-            # 两个信号任一命中就去读：微信自己的「有人@我」标记，或摘要里出现 @机器人
+            if self._is_self_summary(session.summary):
+                continue
+
             mentioned = contains_mention(session.summary, self.bot_names)
             if not (session.at_me or mentioned):
                 continue
@@ -251,6 +242,11 @@ class UiaGateway(BaseGateway):
                 continue
             out.append(parse_session_name(cell.Name or ""))
         return out
+
+    def _is_self_summary(self, summary: str) -> bool:
+        text = (summary or "").strip()
+        return any(text.startswith(f"{name}:") or text.startswith(f"{name}：")
+                   for name in self.bot_names if name)
 
     def _handle_session(self, session: SessionInfo) -> None:
         if not self._open_chat(session.title):
@@ -297,7 +293,7 @@ class UiaGateway(BaseGateway):
         )
 
     def _current_chat(self) -> str:
-        """当前打开的会话名：输入框的 Name 就是会话标题。"""
+        """当前打开的会话名：输入框的 Name 就是会话标题（空时带占位提示）。"""
         try:
             edit = self._window.EditControl(ClassName=INPUT_FIELD_CLASS)
             if edit.Exists(0.3):
@@ -307,10 +303,6 @@ class UiaGateway(BaseGateway):
         return ""
 
     def _chat_is_open(self, title: str) -> bool:
-        """输入框的 Name 是「会话标题 + 占位提示」，例如「群名长按鼠标 语音输入」。
-
-        所以不能用相等判断，否则会误判成「没打开」而重复点击、把会话 toggle 关闭。
-        """
         current = self._current_chat()
         if not current:
             return False
