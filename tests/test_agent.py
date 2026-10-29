@@ -23,6 +23,12 @@ class FakeLLM:
             raise self.fail
         return self.reply
 
+    def chat_message(self, messages, **kwargs) -> dict:
+        self.calls.append(messages)
+        if self.fail:
+            raise self.fail
+        return {"role": "assistant", "content": self.reply}
+
 
 def build(tmp_path, **overrides) -> AgentService:
     params = dict(
@@ -33,6 +39,7 @@ def build(tmp_path, **overrides) -> AgentService:
         max_replies_per_minute=0,
         context_messages=5,
         summary_trigger=0,
+        enable_web_search=False,
     )
     params.update(overrides)
     cfg = Settings(**params)
