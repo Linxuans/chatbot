@@ -57,7 +57,7 @@ def parse_bing(page: str, limit: int = 5) -> list[SearchResult]:
     return results
 
 
-def fetch_text(url: str, max_chars: int = 1200, timeout: float = 10.0) -> str:
+def fetch_text(url: str, max_chars: int = 1600, timeout: float = 10.0) -> str:
     """抓取网页正文纯文本。失败返回空串，不影响搜索本身。"""
     if not url or not url.startswith("http"):
         return ""
@@ -145,7 +145,7 @@ WEB_SEARCH_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "搜索关键词，尽量具体"},
+                "query": {"type": "string", "description": "搜索关键词。查天气/股价/新闻这类用简短关键词即可，例如「上海天气」「上证指数」"},
             },
             "required": ["query"],
         },
