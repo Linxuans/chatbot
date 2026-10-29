@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import re
 import time
 from dataclasses import dataclass
 
@@ -49,42 +50,61 @@ class SessionInfo:
     unread: int
     summary: str
     time_text: str
+    at_me: bool = False
 
     @property
     def has_new(self) -> bool:
         return self.unread > 0
 
 
+_TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
+_COUNT_RE = re.compile(r"^\[(\d+)条\]\s*(.*)$")
+# 微信在会话行里插入的各种标记，不是消息内容
+_MARKERS = {"[有人@我]", "消息免打扰", "[草稿]", "[未读]", "[语音]", "[图片]"}
+
+
 def parse_session_name(raw: str) -> SessionInfo:
-    """解析会话列表项的 Name："会话名\n未读数或摘要\n时间"。"""
-    parts = [p.strip() for p in (raw or "").split("\n")]
-    parts = [p for p in parts if p] or [""]
-    title = parts[0]
+    """解析会话列表项的 Name。
+
+    实测格式（字段数不固定）：
+        浮三生、再睡一夏夏\n[7条] \n[有人@我]\n再睡一夏夏: @城南 在\n23:57
+        文件传输助手\n\n
+        腾讯新闻\n[3条] \n摘要...\n23:29
+    """
+    raw = raw or ""
+    parts = [p.strip() for p in raw.split("\n") if p.strip()]
+    title = parts[0] if parts else ""
+
     unread = 0
-    summary = ""
     time_text = ""
+    candidates: list[str] = []
 
     for part in parts[1:]:
         if part.isdigit():
-            unread = int(part)
+            unread = max(unread, int(part))
             continue
-        if part.startswith("[") and "条]" in part:
-            digits = part[1:part.index("条]")]
-            if digits.isdigit():
-                unread = int(digits)
-            rest = part[part.index("条]") + 2:].strip()
-            if rest:
-                summary = rest
+        counted = _COUNT_RE.match(part)
+        if counted:
+            unread = max(unread, int(counted.group(1)))
+            if counted.group(2).strip():
+                candidates.append(counted.group(2).strip())
             continue
-        if ":" in part and len(part) <= 6 and part.replace(":", "").isdigit():
+        if _TIME_RE.match(part):
             time_text = part
             continue
-        if not summary:
-            summary = part
-        else:
-            time_text = part
+        if part in _MARKERS:
+            continue
+        candidates.append(part)
 
-    return SessionInfo(title=title, unread=unread, summary=summary, time_text=time_text)
+    # 摘要取最后一个候选：微信把最新一条消息放在时间之前
+    summary = candidates[-1] if candidates else ""
+    return SessionInfo(
+        title=title,
+        unread=unread,
+        summary=summary,
+        time_text=time_text,
+        at_me="[有人@我]" in raw,
+    )
 
 
 def contains_mention(text: str, bot_names: list[str]) -> bool:
@@ -173,8 +193,15 @@ class UiaGateway(BaseGateway):
         return True
 
     def _prune_baseline(self) -> None:
-        """记录当前所有会话摘要，避免启动时把历史消息当成新消息回复。"""
+        """记录当前会话摘要，避免启动时回复历史消息。
+
+        例外：带「有人@我」标记且未读的会话不记基线——那是明确找过机器人、
+        但还没被回复的消息，启动后应当补上。
+        """
         for session in self._sessions():
+            if session.at_me and session.unread > 0:
+                log.info("启动时发现未回复的 @ 会话: %s（未读 %d）", session.title, session.unread)
+                continue
             self._last_summary.setdefault(session.title, session.summary)
 
     def run_forever(self) -> None:
@@ -205,12 +232,9 @@ class UiaGateway(BaseGateway):
                 continue
             self._last_summary[session.title] = session.summary
 
-            # 摘要里能看到最后一条消息，@ 一般出现在开头，够用来判断
-            if not contains_mention(session.summary, self.bot_names):
-                continue
-            if is_at_all(session.summary) and not any(
-                f"@{n}" in session.summary for n in self.bot_names
-            ):
+            # 两个信号任一命中就去读：微信自己的「有人@我」标记，或摘要里出现 @机器人
+            mentioned = contains_mention(session.summary, self.bot_names)
+            if not (session.at_me or mentioned):
                 continue
 
             self._handle_session(session)
@@ -282,9 +306,19 @@ class UiaGateway(BaseGateway):
             pass
         return ""
 
+    def _chat_is_open(self, title: str) -> bool:
+        """输入框的 Name 是「会话标题 + 占位提示」，例如「群名长按鼠标 语音输入」。
+
+        所以不能用相等判断，否则会误判成「没打开」而重复点击、把会话 toggle 关闭。
+        """
+        current = self._current_chat()
+        if not current:
+            return False
+        return current == title or current.startswith(title)
+
     def _open_chat(self, title: str) -> bool:
         # 已经打开就不能再点，否则会 toggle 关闭（实测踩过）
-        if self._current_chat() == title:
+        if self._chat_is_open(title):
             return True
 
         table = self._window.ListControl(Name=SESSION_LIST_NAME)
@@ -301,10 +335,10 @@ class UiaGateway(BaseGateway):
                 log.debug("点击会话失败", exc_info=True)
                 return False
             for _ in range(12):
-                if self._current_chat() == title:
+                if self._chat_is_open(title):
                     return True
                 time.sleep(0.15)
-            return self._current_chat() == title
+            return self._chat_is_open(title)
         log.warning("会话列表里没有: %s", title)
         return False
 
