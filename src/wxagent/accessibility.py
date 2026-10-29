@@ -16,6 +16,7 @@ import struct
 import threading
 import time
 from ctypes import wintypes
+from pathlib import Path
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,13 @@ TH32CS_SNAPMODULE = 0x00000008
 TH32CS_SNAPMODULE32 = 0x00000010
 PROCESS_ACCESS = 0x0400 | 0x0010 | 0x0020 | 0x0008
 WINDOW_TITLE_EXACT = ("微信", "WeChat", "Weixin")
+SW_RESTORE = 9
+SW_SHOW = 5
+# 主界面至少这么大；登录窗约 350x475，会被挡掉
+MIN_MAIN_WINDOW_AREA = 260_000
+
+# 扫描结果按 DLL 身份缓存：198MB 扫一次约 8 秒，不能每次重连都扫
+_RVA_CACHE: dict[str, int] = {}
 
 
 class MODULEENTRY32W(ctypes.Structure):
@@ -71,15 +79,29 @@ def module_base(pid: int, wanted: str = "weixin.dll") -> Optional[tuple[int, str
     return None
 
 
-def find_wechat_window() -> Optional[tuple[int, int, str]]:
-    """返回 (hwnd, pid, title)：可见、标题为微信、且进程加载了 Weixin.dll。"""
+def is_process_alive(pid: int) -> bool:
+    if not pid:
+        return False
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def find_wechat_window(require_module: bool = True) -> Optional[tuple[int, int, str]]:
+    """返回 (hwnd, pid, title)：可见或最小化的微信主窗口。"""
     user32 = ctypes.windll.user32
     found: list[tuple[int, int, int, str]] = []
 
     @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
     def callback(hwnd, _lparam):
-        if not user32.IsWindowVisible(hwnd):
-            return True
         buf = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, buf, 256)
         title = (buf.value or "").strip()
@@ -87,13 +109,27 @@ def find_wechat_window() -> Optional[tuple[int, int, str]]:
             return True
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
-        if not pid.value or not module_base(pid.value):
+        if not pid.value:
             return True
+        if require_module and not module_base(pid.value):
+            return True
+        minimised = bool(user32.IsIconic(hwnd))
+        visible = bool(user32.IsWindowVisible(hwnd))
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        class_name = cls.value or ""
+        # 登录窗也叫「微信」，但不是主界面，绑定它没有意义
+        if "Login" in class_name:
+            return True
+
         rect = wintypes.RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(rect))
         area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
-        if area < 100000:
+        # 最小化/隐藏时 GetWindowRect 会退化成小矩形，不能用面积过滤——
+        # 否则窗口一旦最小化就再也找不到、也就无法还原
+        if not minimised and visible and area < MIN_MAIN_WINDOW_AREA:
             return True
+        log.debug("候选窗口 hwnd=%s pid=%s 可见=%s 最小化=%s", hwnd, pid.value, visible, minimised)
         found.append((area, hwnd, pid.value, title))
         return True
 
@@ -103,6 +139,28 @@ def find_wechat_window() -> Optional[tuple[int, int, str]]:
     found.sort(reverse=True)
     _area, hwnd, pid, title = found[0]
     return hwnd, pid, title
+
+
+def window_state(hwnd: int) -> tuple[bool, bool]:
+    """(是否可见, 是否最小化)"""
+    user32 = ctypes.windll.user32
+    return bool(user32.IsWindowVisible(hwnd)), bool(user32.IsIconic(hwnd))
+
+
+def restore_window(hwnd: int, foreground: bool = False) -> None:
+    """把最小化/隐藏的窗口还原；foreground=True 时才抢焦点。"""
+    user32 = ctypes.windll.user32
+    visible, minimised = window_state(hwnd)
+    if not visible:
+        user32.ShowWindow(wintypes.HWND(hwnd), SW_SHOW)
+    if minimised or not visible:
+        user32.ShowWindow(wintypes.HWND(hwnd), SW_RESTORE)
+        log.info("已还原微信窗口（最小化/隐藏状态）")
+    if foreground:
+        try:
+            user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        except Exception:
+            pass
 
 
 def pe_sections(data: bytes):
@@ -164,16 +222,39 @@ def scan_gate_rva(dll_path: str) -> list[int]:
     return list(dict.fromkeys(candidates))
 
 
+def gate_rva_cached(dll_path: str) -> int:
+    """带缓存的 gate 定位：同一份 Weixin.dll 只扫一次。"""
+    path = Path(dll_path)
+    try:
+        stat = path.stat()
+        identity = f"{path}|{stat.st_size}|{int(stat.st_mtime)}"
+    except OSError:
+        return 0
+
+    if identity in _RVA_CACHE:
+        return _RVA_CACHE[identity]
+
+    rvas = scan_gate_rva(dll_path)
+    if not rvas:
+        return 0
+    _RVA_CACHE[identity] = rvas[0]
+    log.info("扫描出 gate RVA: 0x%X（已缓存）", rvas[0])
+    return rvas[0]
+
+
 class AccessibilityGate:
-    """保持微信的 mmui:: 控件树处于物化状态。"""
+    """保持微信的 mmui:: 控件树处于物化状态，并能在微信重启后自动恢复。"""
 
     def __init__(self, refresh_seconds: float = 2.0) -> None:
         self.refresh_seconds = refresh_seconds
-        self._pid: int = 0
+        self.hwnd: int = 0
+        self.pid: int = 0
         self._address: int = 0
         self._handle = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self._last_missing_log = 0.0
 
     # ---------------------------------------------------------------- 底层
     def _read(self, address: int):
@@ -190,73 +271,94 @@ class AccessibilityGate:
         ok = k32.WriteProcessMemory(self._handle, ctypes.c_void_p(address), buf, 1, ctypes.byref(done))
         return bool(ok and done.value == 1)
 
-    # ---------------------------------------------------------------- 控制
-    def attach(self) -> bool:
-        """找到微信并算出 gate 地址；失败返回 False。"""
-        found = find_wechat_window()
-        if not found:
-            log.error("没找到正在运行的微信主窗口（未登录或已最小化到托盘）")
-            return False
-        _hwnd, pid, _title = found
-        module = module_base(pid)
-        if not module:
-            log.error("进程 %s 没有加载 Weixin.dll", pid)
-            return False
-        base, dll_path = module
-
-        rvas = scan_gate_rva(dll_path)
-        if not rvas:
-            log.error("没能从 %s 定位 gate 字节", dll_path)
-            return False
-
-        k32 = ctypes.windll.kernel32
-        k32.OpenProcess.restype = wintypes.HANDLE
-        handle = k32.OpenProcess(PROCESS_ACCESS, False, pid)
-        if not handle:
-            log.error("OpenProcess 失败：请让本程序与微信保持相同权限级别")
-            return False
-
-        self._pid = pid
-        self._handle = handle
-        self._address = base + rvas[0]
-        log.info("无障碍 gate: pid=%s base=0x%X rva=0x%X", pid, base, rvas[0])
-        return True
-
-    def open_gate(self) -> bool:
-        if not self._handle:
-            return False
-        current = self._read(self._address)
-        if current == 1:
-            return True
-        return self._write(self._address, 1)
-
-    def start(self) -> bool:
-        if not self.attach():
-            return False
-        if not self.open_gate():
-            log.error("写入 gate 失败")
-            return False
-
-        def keeper() -> None:
-            while not self._stop.is_set():
-                try:
-                    if self._read(self._address) != 1:
-                        self._write(self._address, 1)
-                except Exception:
-                    log.debug("gate 保活异常", exc_info=True)
-                self._stop.wait(self.refresh_seconds)
-
-        self._thread = threading.Thread(target=keeper, name="uia-gate", daemon=True)
-        self._thread.start()
-        return True
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=3)
+    def _close_handle(self) -> None:
         if self._handle:
             try:
                 ctypes.windll.kernel32.CloseHandle(self._handle)
             except Exception:
                 pass
             self._handle = None
+
+    # ---------------------------------------------------------------- 控制
+    def attach(self) -> bool:
+        """找到微信并算出 gate 地址。已 attach 且进程没变时直接复用。"""
+        with self._lock:
+            found = find_wechat_window()
+            if not found:
+                now = time.time()
+                if now - self._last_missing_log > 60:
+                    log.warning("没找到正在运行的微信主窗口（等待微信启动/恢复登录）")
+                    self._last_missing_log = now
+                return False
+            hwnd, pid, _title = found
+
+            if pid == self.pid and self._handle and is_process_alive(pid):
+                self.hwnd = hwnd
+                return True
+
+            self._close_handle()
+            module = module_base(pid)
+            if not module:
+                log.error("进程 %s 没有加载 Weixin.dll", pid)
+                return False
+            base, dll_path = module
+
+            rva = gate_rva_cached(dll_path)
+            if not rva:
+                log.error("没能从 %s 定位 gate 字节", dll_path)
+                return False
+
+            k32 = ctypes.windll.kernel32
+            k32.OpenProcess.restype = wintypes.HANDLE
+            handle = k32.OpenProcess(PROCESS_ACCESS, False, pid)
+            if not handle:
+                log.error("OpenProcess 失败：请让本程序与微信保持相同权限级别")
+                return False
+
+            self.hwnd = hwnd
+            self.pid = pid
+            self._handle = handle
+            self._address = base + rva
+            log.info("已 attach 微信: pid=%s base=0x%X rva=0x%X", pid, base, rva)
+            return True
+
+    def open_gate(self) -> bool:
+        if not self._handle:
+            return False
+        if self._read(self._address) == 1:
+            return True
+        return self._write(self._address, 1)
+
+    def ensure(self) -> bool:
+        """保证 gate 处于打开状态；微信重启后会自动重新 attach。"""
+        if not self.pid or not is_process_alive(self.pid) or not self.attach():
+            if not self.attach():
+                return False
+        return self.open_gate()
+
+    def start(self) -> bool:
+        """启动保活线程。即使此刻微信不可用也不返回失败——线程会持续重试。"""
+        ready = False
+        if self.attach() and self.open_gate():
+            ready = True
+        else:
+            log.warning("微信当前不可用（未启动 / 未登录），后台等待…")
+
+        def keeper() -> None:
+            while not self._stop.is_set():
+                try:
+                    if not self.ensure():
+                        log.debug("gate 保活：微信暂不可用")
+                except Exception:
+                    log.debug("gate 保活异常", exc_info=True)
+                self._stop.wait(self.refresh_seconds)
+
+        self._thread = threading.Thread(target=keeper, name="uia-gate", daemon=True)
+        self._thread.start()
+        return ready
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3)
+        self._close_handle()
