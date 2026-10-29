@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import uiautomation as auto
 
 from ..accessibility import AccessibilityGate, find_wechat_window, restore_window, window_state
+from ..config import PAUSE_FLAG
 from .base import BaseGateway, MessageHandler
 
 log = logging.getLogger(__name__)
@@ -129,6 +130,7 @@ class UiaGateway(BaseGateway):
         self._answered: dict[str, str] = {}
         self._last_summary: dict[str, str] = {}
         self._last_wait_log = 0.0
+        self._paused = False
 
     # ---------------------------------------------------------------- 生命周期
     def start(self) -> None:
@@ -199,6 +201,14 @@ class UiaGateway(BaseGateway):
         self._running = True
         log.info("开始监听微信消息…（每 %.1fs 轮询一次，只有 @ 才回复）", self.poll_interval)
         while self._running:
+            paused = PAUSE_FLAG.exists()
+            if paused != self._paused:
+                self._paused = paused
+                log.info("机器人%s（%s）", "已暂停：不再碰微信窗口" if paused else "已恢复监听",
+                         "删除 data/pause.flag 或 run.py --mode resume" if paused else "")
+            if paused:
+                time.sleep(self.poll_interval)
+                continue
             try:
                 if self._ensure_ready():
                     self._poll_once()

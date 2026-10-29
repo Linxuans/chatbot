@@ -14,6 +14,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# 存在这个文件时，网关不碰微信窗口（用于手动切账号/关窗等操作）
+PAUSE_FLAG = PROJECT_ROOT / "data" / "pause.flag"
+
 
 def _load_dotenv() -> None:
     try:

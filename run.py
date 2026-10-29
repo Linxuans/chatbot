@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from wxagent.agent import AgentService, IncomingMessage  # noqa: E402
-from wxagent.config import Settings, setup_logging  # noqa: E402
+from wxagent.config import PAUSE_FLAG, Settings, setup_logging  # noqa: E402
 
 log = logging.getLogger("wxagent.run")
 
@@ -124,6 +124,23 @@ def run_uia(cfg: Settings) -> None:
         gateway.stop()
 
 
+def run_pause(cfg: Settings) -> None:
+    """暂停机器人：写一个标志文件，网关看到后停止还原窗口和轮询，方便手动操作微信。"""
+    PAUSE_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    PAUSE_FLAG.write_text("paused", encoding="utf-8")
+    print(f"机器人已暂停，不会再碰微信窗口。")
+    print(f"恢复：python run.py --mode resume")
+
+
+def run_resume(cfg: Settings) -> None:
+    """恢复机器人。"""
+    try:
+        PAUSE_FLAG.unlink()
+    except FileNotFoundError:
+        pass
+    print("机器人已恢复监听。")
+
+
 def run_check(cfg: Settings) -> None:
     """环境自检：版本、依赖、端口、Key 一次查完。"""
     from wxagent.doctor import run_doctor
@@ -155,6 +172,8 @@ def run_probe(cfg: Settings) -> None:
 
 MODES = {
     "doctor": run_check,
+    "pause": run_pause,
+    "resume": run_resume,
     "uia": run_uia,
     "embedded": run_embedded,
     "gateway": run_gateway,

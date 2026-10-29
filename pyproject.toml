@@ -1,6 +1,6 @@
 [project]
 name = "wx-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "微信群聊智能体：可插拔网关 + 容器化核心"
 requires-python = ">=3.10"
 
