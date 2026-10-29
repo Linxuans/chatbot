@@ -219,16 +219,19 @@ class UiaGateway(BaseGateway):
             previous = self._last_summary.get(session.title)
             if session.summary == previous:
                 continue
-            self._last_summary[session.title] = session.summary
 
             if self._is_self_summary(session.summary):
+                self._last_summary[session.title] = session.summary
                 continue
 
             mentioned = contains_mention(session.summary, self.bot_names)
             if not (session.at_me or mentioned):
+                self._last_summary[session.title] = session.summary
                 continue
 
-            self._handle_session(session)
+            # 只有处理成功（或确认无需回复）才推进进度；失败留下轮重试
+            if self._handle_session(session):
+                self._last_summary[session.title] = session.summary
 
     def _sessions(self) -> list[SessionInfo]:
         if self._window is None:
@@ -248,10 +251,12 @@ class UiaGateway(BaseGateway):
         return any(text.startswith(f"{name}:") or text.startswith(f"{name}：")
                    for name in self.bot_names if name)
 
-    def _handle_session(self, session: SessionInfo) -> None:
+    def _handle_session(self, session: SessionInfo) -> bool:
+        """处理一条会话。返回 False 表示这次没处理成（下轮会重试），
+        返回 True 表示已消费（成功回复，或确认无需回复）。"""
         if not self._open_chat(session.title):
-            log.warning("打开会话失败: %s", session.title)
-            return
+            log.warning("打开会话失败（稍后重试）: %s", session.title)
+            return False
 
         time.sleep(0.4)
         texts = self._recent_texts()
@@ -261,9 +266,9 @@ class UiaGateway(BaseGateway):
             "",
         )
         if not target:
-            return
+            return True  # 打开是打开了，但没有 @ 机器人的正文
         if self._answered.get(session.title) == target:
-            return
+            return True  # 已经回过这条
 
         log.info("收到 @ 消息 群=%s 内容=%r", session.title, target[:80])
         self._answered[session.title] = target
@@ -271,8 +276,9 @@ class UiaGateway(BaseGateway):
         msg = self._build_incoming(session.title, target, texts)
         replies = self.dispatch(msg)
         if not replies:
-            return
+            return True
         self.deliver(session.title, replies)
+        return True
 
     def _build_incoming(self, title: str, last: str, texts: list[str]):
         from ..agent import IncomingMessage
@@ -320,16 +326,17 @@ class UiaGateway(BaseGateway):
             name = (cell.Name or "").split("\n")[0].strip()
             if name != title:
                 continue
-            try:
-                restore_window(self._hwnd, foreground=True)
-                cell.Click(simulateMove=True)
-            except Exception:
-                log.debug("点击会话失败", exc_info=True)
-                return False
-            for _ in range(12):
-                if self._chat_is_open(title):
-                    return True
-                time.sleep(0.15)
+            for attempt in range(3):
+                try:
+                    restore_window(self._hwnd, foreground=True)
+                    cell.Click(simulateMove=True)
+                except Exception:
+                    log.debug("点击会话失败", exc_info=True)
+                for _ in range(8):
+                    if self._chat_is_open(title):
+                        return True
+                    time.sleep(0.15)
+                time.sleep(0.5)
             return self._chat_is_open(title)
         log.warning("会话列表里没有: %s", title)
         return False

@@ -37,7 +37,13 @@ Get-ScheduledTask -TaskName 'WxAgentBotUIA' | Select TaskName, State
 Start-ScheduledTask -TaskName 'WxAgentBotUIA'      # 手动触发
 ```
 
-脚本 `scripts\start-uia.bat` 必须是**纯 ASCII + CRLF**：cmd 按 GBK 解读 .bat，
+计划任务直接跑 `pythonw.exe run.py --mode uia`（**无控制台**），不经过 .bat。
+
+**为什么用 pythonw**：带控制台的 python 会挂在控制台上，控制台一断（工具后台清理）
+就收到 Ctrl+C 被干掉，退出码 0xC000013A，表现是「微信重登后机器人彻底死了」。
+pythonw 没有控制台，天然免疫 Ctrl+C。
+
+`scripts\start-uia.bat` 保留手动用，但必须是**纯 ASCII + CRLF**：cmd 按 GBK 解读 .bat，
 里面写中文会让整行解析错乱（已踩过）。
 
 登录微信不等于生效：网关进程必须在跑。但网关支持「等待模式」——
@@ -79,6 +85,10 @@ Start-ScheduledTask -TaskName 'WxAgentBotUIA'      # 手动触发
 `会话名 \n [7条] \n [有人@我] \n 某人: 内容 \n 23:57`
 早期把 `[有人@我]` 当摘要，导致永远判断不出 @。现在 `parse_session_name` 跳过标记字段、
 摘要取时间前的最后一个候选，并单独记录 `at_me`。
+
+### 打开会话失败不会重试（曾导致漏回复）
+`_handle_session` 返回是否消费成功；只有成功才推进 `_last_summary`。
+失败留下轮重试；`_open_chat` 点会话最多重试 3 次。
 
 ### 会话已打开时会丢失未读与 @ 标记
 微信在会话处于打开状态时不会保留未读数。所以判断条件不能只看 `unread>0`，
