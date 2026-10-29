@@ -188,6 +188,7 @@ src/<pkg>/
 
 - **版本静默失效**：程序在跑、消息收不到，九成是微信和 DLL 没配对。做个 `doctor` 命令自动比对。
 - **注册表残留陷阱**：`DisplayVersion` 说有 3.9，实际目录里只有升级残留、没有 exe。必须以磁盘上的 exe 为准。
+- **国内直连 github.com 不稳**：`api.github.com` 通常通但 `github.com:443` 会被重置。给该仓库单独配 `git config --local http.proxy http://127.0.0.1:7890`（Clash 默认端口），不要写全局。
 - **微信 3.9 安装器无视 `/D=`**：它硬装到 `C:\Program Files\Tencent\WeChat`，连注册表 `InstallPath` 都会被覆盖。要装别的盘只能装完用管理员搬，通常不值得。
 - **企业微信误判**：以为官方机器人能进微信群，方案做完才发现只能内部群。
 - **@ 识别**：只靠昵称匹配会被改名、表情符号搞挂；用 xml 的 `atuserlist`。

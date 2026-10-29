@@ -380,6 +380,7 @@ Copy-Item data\bot.db data\bot.db.bak
 | 中文乱码 | 控制台编码 | `chcp 65001` 或设 `PYTHONIOENCODING=utf-8` |
 | 端口 10086 被占用 | 残留进程 | 杀 `wcf.exe`/`python`，或改 `WCF_PORT` |
 | 模型超时 | 网络 | `doctor` 看「模型接口连通」 |
+| `git push` 连不上 GitHub | 直连 github.com:443 被重置 | 走本地代理：`git config --local http.proxy http://127.0.0.1:7890`（换成你自己的代理端口） |
 
 ---
 
