@@ -287,11 +287,15 @@ def _check_wechat() -> list[Check]:
     )
 
     if modern:
+        if legacy:
+            advice = "4.x 不参与机器人，主号继续用它即可；机器人用小号登录 3.9 那个客户端"
+        else:
+            advice = "hook 只支持 3.9.x，4.x 无法注入：需另装 3.9.12.17 并用小号登录（可与 4.x 共存）"
         checks.append(
             Check(
                 "微信 4.x", "warn",
                 "、".join(i["version"] for i in modern),
-                "hook 只支持 3.9.x：4.x 无法注入。需另装 3.9.12.17 并用小号登录（可与 4.x 共存）",
+                advice,
             )
         )
 
