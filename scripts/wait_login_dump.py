@@ -11,7 +11,7 @@ import time
 import uiautomation as auto
 
 
-def find_main_window(timeout: float = 900.0):
+def find_main_window(timeout: float = 7200.0):
     """主窗口特征：mmui:: 类名 + 尺寸明显大于登录窗。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
