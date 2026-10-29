@@ -89,6 +89,26 @@ def run_core(cfg: Settings) -> None:
     uvicorn.run(app, host=cfg.core_host, port=cfg.core_port, log_level="warning")
 
 
+def run_uia(cfg: Settings) -> None:
+    """微信 4.x 界面自动化模式（不注入，依赖无障碍控件树）。"""
+    from wxagent.gateway.uia_gw import UiaGateway
+
+    service = _build_service(cfg)
+    gateway = UiaGateway(
+        service.handle,
+        bot_names=cfg.bot_names or [service.bot_name],
+        poll_interval=cfg.uia_poll_interval,
+        allowed_chats=cfg.allowed_rooms,
+    )
+    gateway.start()
+    try:
+        gateway.run_forever()
+    except KeyboardInterrupt:
+        log.info("收到中断，正在退出…")
+    finally:
+        gateway.stop()
+
+
 def run_check(cfg: Settings) -> None:
     """环境自检：版本、依赖、端口、Key 一次查完。"""
     from wxagent.doctor import run_doctor
@@ -120,6 +140,7 @@ def run_probe(cfg: Settings) -> None:
 
 MODES = {
     "doctor": run_check,
+    "uia": run_uia,
     "embedded": run_embedded,
     "gateway": run_gateway,
     "core": run_core,

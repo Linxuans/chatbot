@@ -105,6 +105,7 @@ class Settings:
     core_host: str = "0.0.0.0"
     core_port: int = 8000
     gateway_token: str = ""
+    uia_poll_interval: float = 3.0
     wcf_port: int = 10086
     wcf_debug: bool = False
 
@@ -144,6 +145,7 @@ class Settings:
             core_host=_s("CORE_HOST", "0.0.0.0"),
             core_port=_i("CORE_PORT", 8000),
             gateway_token=_s("GATEWAY_TOKEN"),
+            uia_poll_interval=_f("UIA_POLL_INTERVAL", 3.0),
             wcf_port=_i("WCF_PORT", 10086),
             wcf_debug=_b("WCF_DEBUG", False),
         )
