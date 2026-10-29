@@ -1,0 +1,19 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 配置与数据（含密钥，绝不提交）
+.env
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+
+# 临时与缓存
+.tmp/
+.pipcache/
+.pipdl/

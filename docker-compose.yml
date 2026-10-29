@@ -1,0 +1,38 @@
+# 典型用法：核心跑在 Linux 服务器/NAS 上，微信网关跑在家里那台常开的 Windows 上
+#
+#   docker compose up -d --build
+#   # Windows 那台：
+#   python run.py --mode gateway --core-url http://<这台机器IP>:8000
+services:
+  core:
+    build: .
+    image: wx-agent-core:latest
+    container_name: wx-agent-core
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MODE: core
+      DB_PATH: /data/bot.db
+      CORE_HOST: 0.0.0.0
+      CORE_PORT: "8000"
+    ports:
+      - "8000:8000"
+    # 用命名卷而不是 ./data：容器内以非 root 的 app 用户运行，
+    # 绑定挂载会继承宿主机目录权限，SQLite 很可能写不进去。
+    volumes:
+      - wx-agent-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  wx-agent-data:
+    # 想把数据放在宿主机某个目录，先 sudo chown -R 1000:1000 ./data，再改成：
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /绝对路径/data

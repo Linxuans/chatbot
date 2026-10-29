@@ -1,0 +1,10 @@
+# 微信网关：仅 Windows，需要本机装有微信 3.9.12.17 客户端并已登录
+#
+# 版本必须成对：wcferry 的注入 DLL 是按某个微信构建编译的，差一个 build 就可能失效。
+# 实测对应关系（读各版本 wheel 内 spy.dll 得到）：
+#   wcferry 39.4.2.2 / 39.4.5.0  ->  微信 3.9.12.17   ← 本项目默认
+#   wcferry 39.5.1.0 / 39.5.2.0  ->  微信 3.9.12.51
+#   wcferry 39.6.0.0             ->  微信 3.9.12.56
+# 换微信版本时记得同步换 wcferry，反之亦然；`python run.py --mode doctor` 会直接告诉你配没配上。
+-r requirements.txt
+wcferry==39.4.5.0

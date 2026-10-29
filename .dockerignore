@@ -1,0 +1,11 @@
+.venv/
+.git/
+data/
+logs/
+.tmp/
+.pipcache/
+.pipdl/
+__pycache__/
+*.pyc
+tests/
+.env

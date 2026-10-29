@@ -1,0 +1,9 @@
+# 智能体核心：跨平台，Linux / Docker 可直接装
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+httpx>=0.27,<1.0
+python-dotenv>=1.0,<2.0
+pydantic>=2.7,<3.0
+
+# 开发/测试
+pytest>=8.0,<10.0

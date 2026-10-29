@@ -1,0 +1,10 @@
+[project]
+name = "wx-agent"
+version = "0.1.0"
+description = "微信群聊智能体：可插拔网关 + 容器化核心"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
