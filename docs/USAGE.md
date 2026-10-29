@@ -105,6 +105,34 @@ cd F:\work\api
 
 ---
 
+### 2.4 已有微信 4.x，怎么再装一个 3.9.12.17（共存）
+
+3.9 和 4.x 是两个独立程序（`WeChat.exe` / `Weixin.exe`），**可以同时安装、同时运行、分别登录不同账号**，互不干扰。
+
+1. 下载 3.9.12.17 安装包：
+   <https://github.com/tom-snow/wechat-windows-versions/releases/tag/v3.9.12.17>
+2. 装到**独立目录**（例如 `E:\weichat\WeChat39`），不要覆盖你现有的 4.x。
+3. 先别登录，打开 3.9 的「设置 → 通用设置」，**取消勾选自动更新**。
+4. 用**机器人小号**登录 3.9；4.x 那边继续用你的主号。
+5. 跑 `run.py --mode doctor`，确认这一行：
+
+   ```
+   [ OK ] 版本匹配            微信 3.9.12.17 = DLL 目标 3.9.12.17
+   ```
+
+**如果 3.9.12.17 登录时提示「版本过低」**，说明腾讯已经封了这个构建。改用另一组已验证的配对：
+
+- 微信 `3.9.12.51` + `wcferry==39.5.2.0`
+
+改 `requirements-gateway.txt` 里那一行，然后重装：
+
+```powershell
+.\.venv\Scripts\\python.exe -m pip install --upgrade wcferry==39.5.2.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+.\.venv\Scripts\\python.exe run.py --mode doctor
+```
+
+---
+
 ## 3. 安装依赖
 
 项目里已经有 `.venv`。如果是全新环境：
