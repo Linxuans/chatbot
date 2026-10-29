@@ -113,36 +113,35 @@ cd F:\work\api
 
 ---
 
-### 2.4 已有微信 4.x，怎么再装一个 3.9.12.17（共存）
+### 2.4 再装一个 3.9.12.51（与 4.x 共存）
 
-3.9 和 4.x 是两个独立程序（`WeChat.exe` / `Weixin.exe`），**可以同时安装、同时运行、分别登录不同账号**，互不干扰。
+3.9 和 4.x 是两个独立程序（`WeChat.exe` / `Weixin.exe`），**可以同时安装、同时运行、分别登录不同账号**。
 
-1. 下载 3.9.12.17 安装包：
-   <https://github.com/tom-snow/wechat-windows-versions/releases/tag/v3.9.12.17>
+1. 下载 3.9.12.51：
+   <https://github.com/tom-snow/wechat-windows-versions/releases/tag/v3.9.12.51>
 
-   可选校验：SHA256 应为 `4985f96235154fc4176e3972f14709f5f10fc0606e5589075a6da9b6dc7fccd3`，
+   校验：SHA256 应为 `86593666b6a81a742435879db25c2575a9f8967b877968c91aaa8a68b5f21af4`，
    数字签名应为 `Tencent Technology (Shenzhen) Company Limited`。
-2. 双击安装，**用默认路径 `C:\Program Files\Tencent\WeChat` 就行**。
+2. 双击安装，**用默认路径 `C:\Program Files\Tencent\WeChat`**。
 3. 装完**先别登录**，打开 3.9 的「设置 → 通用设置」，取消勾选自动更新。
-4. 用**机器人小号**登录 3.9；4.x 那边继续用你的主号。
-5. `run.py --mode doctor` 应出现：
+4. 用**机器人小号**登录 3.9；4.x 继续用你的主号。
+5. 装依赖（版本必须配对）：
 
+   ```powershell
+   .\.venv\Scripts\python.exe -m pip install --upgrade wcferry==39.5.2.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+   .\.venv\Scripts\python.exe run.py --mode doctor
    ```
-   [ OK ] 版本匹配            微信 3.9.12.17 = DLL 目标 3.9.12.17
-   ```
 
-> **安装器的坑（实测）**：WeChat 3.9 的安装器会**忽略 `/D=` 参数，也会覆盖注册表里的 InstallPath**，强制装到 `C:\Program Files\Tencent\WeChat`。想把目录放别的盘，只能装完后用管理员权限搬走，不建议折腾——它和 4.x 的 `E:\weichat\Weixin` 本来就不冲突。
+   **应看到**：`[ OK ] 版本匹配  微信 3.9.12.51 = DLL 目标 3.9.12.51`
 
-**如果 3.9.12.17 登录时提示「版本过低」**，说明腾讯已封掉该构建。改用另一组已验证的配对：
+> **为什么不是 3.9.12.17**：腾讯已对该构建封停登录（「当前微信版本过低」），3.9.12.51 是目前能配到 hook 的最新公开 3.9 构建。
+>
+> **安装器的坑（实测）**：WeChat 3.9 的安装器会忽略 `/D=`，也覆盖注册表 `InstallPath`，强制装到 `C:\Program Files\Tencent\WeChat`。要换盘只能装完用管理员搬，不建议。
 
-- 微信 `3.9.12.51` + `wcferry==39.5.2.0`
+**如果 3.9.12.51 登录时仍提示「版本过低」**：说明腾讯已要求 4.x 客户端，3.9 这条线整体走不通了。届时只剩两条路：
 
-改 `requirements-gateway.txt` 里那一行后重装：
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade wcferry==39.5.2.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
-.\.venv\Scripts\python.exe run.py --mode doctor
-```
+- 改用 4.x 的 UI 自动化方案（`wxauto4` 免费版仅支持 ≤ 4.1.8.107；`wxautox4` Plus 支持最新版但需付费激活码）
+- 或用版本伪装工具（如 `FakeWechatVersion`，把 3.9 伪装成 4.x 骗过校验）——这属于绕过腾讯的安全校验，风险显著高于 hook 本身，需自行权衡
 
 ---
 
