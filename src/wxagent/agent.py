@@ -168,7 +168,7 @@ class AgentService:
     # ---------------------------------------------------------------- 模型
     MAX_TOOL_ROUNDS = 2
     # 单条消息最多调几次工具 / 最多花多久，防止模型反复搜索把回复拖没
-    MAX_TOOL_CALLS = 3
+    MAX_TOOL_CALLS = 2
     MAX_TOOL_SECONDS = 20.0
 
     def _ask(self, messages: list[dict]) -> str:
