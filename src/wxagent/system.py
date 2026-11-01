@@ -84,11 +84,34 @@ def wechat_state() -> str:
     return "已登录"
 
 
+def _kill_orphan_gateways() -> int:
+    """清理没有 pid 文件的遗留网关实例（旧版本启动的，会一直占着互斥体）。
+
+    用 PowerShell 按命令行匹配，避免误杀其它 python 程序。
+    """
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' or Name='python.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*run.py --mode uia*' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=30,
+        )
+    except Exception:
+        return 0
+    killed = [line for line in (result.stdout or "").splitlines() if line.strip().isdigit()]
+    return len(killed)
+
+
 def start_gateway() -> tuple[bool, str]:
     """以无控制台方式启动网关，等待 pid 文件出现。"""
     if gateway_running():
         pid = gateway_pid()
-        return True, (f"网关已在运行（PID {pid}）" if pid else "网关已在运行")
+        if pid:
+            return True, f"网关已在运行（PID {pid}）"
+        return False, "检测到没有 PID 记录的旧网关实例，请先点「停止网关」清理"
     pythonw = PROJECT_ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if not pythonw.is_file():
         return False, f"找不到 {pythonw}"
@@ -118,6 +141,15 @@ def stop_gateway() -> tuple[bool, str]:
             PID_FILE.unlink()
         except OSError:
             pass
+        if gateway_mutex_held():
+            killed = _kill_orphan_gateways()
+            for _ in range(20):
+                if not gateway_mutex_held():
+                    break
+                time.sleep(0.25)
+            if gateway_mutex_held():
+                return False, "发现旧实例但清理失败，请在任务管理器结束 pythonw.exe"
+            return True, f"已清理 {killed} 个旧网关实例"
         return True, "网关未在运行"
 
     # 先温和地杀整棵进程树（venv 的 pythonw 是启动器，会再拉起解释器）
