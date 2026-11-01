@@ -20,6 +20,7 @@ from .config import PROJECT_ROOT
 from .envfile import EnvFile
 from .system import (
     gateway_pid,
+    gateway_running,
     is_paused,
     open_path,
     set_paused,
@@ -92,6 +93,28 @@ SCHEMA: list[tuple[str, list[tuple]]] = [
 ]
 
 PAD = 8
+
+# .env 里可能不存在某些键（老版本配置文件），表单要给默认值，
+# 否则输入框是空的，点保存就会弹「需要数字」。
+DEFAULTS: dict[str, str] = {
+    "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    "DEEPSEEK_MODEL": "deepseek-flash",
+    "TEMPERATURE": "0.7",
+    "MAX_TOKENS": "400",
+    "ENABLE_WEB_SEARCH": "true",
+    "TRIGGER_MODE": "at",
+    "TRIGGER_PREFIX": "/",
+    "REPLY_IN_PRIVATE": "true",
+    "CONTEXT_MESSAGES": "6",
+    "SUMMARY_TRIGGER": "40",
+    "SUMMARY_KEEP": "12",
+    "SUMMARY_MAX_CHARS": "400",
+    "COOLDOWN_SECONDS": "1",
+    "MAX_REPLIES_PER_MINUTE": "20",
+    "MAX_REPLY_CHARS": "1800",
+    "UIA_POLL_INTERVAL": "3",
+    "LOG_LEVEL": "INFO",
+}
 
 
 def wechat_label(state: str) -> str:
@@ -224,7 +247,7 @@ class App(tk.Tk):
         ttk.Button(actions, text="放弃修改", command=self.reload_settings, width=12).pack(side="left")
 
     def _build_field(self, frame: ttk.Frame, row: int, key: str, kind: str, options) -> None:
-        current = self.env.get(key, "")
+        current = self.env.get(key, "") or DEFAULTS.get(key, "")
         if kind == "bool":
             var = tk.BooleanVar(value=current.strip().lower() in {"1", "true", "yes", "on"})
             ttk.Checkbutton(frame, variable=var).grid(row=row, column=1, sticky="w")
@@ -256,7 +279,7 @@ class App(tk.Tk):
         self.env = EnvFile(ENV_PATH)
         for _group, fields in SCHEMA:
             for key, _label, kind, _options in fields:
-                value = self.env.get(key, "")
+                value = self.env.get(key, "") or DEFAULTS.get(key, "")
                 var = self.vars.get(key)
                 if var is None:
                     continue
@@ -274,11 +297,12 @@ class App(tk.Tk):
             log.exception("刷新状态失败")
 
     def _refresh_status_inner(self) -> None:
+        running = gateway_running()
         pid = gateway_pid()
         paused = is_paused()
         wechat = wechat_state()
 
-        gateway_text = f"运行中（PID {pid}）" if pid else "已停止"
+        gateway_text = (f"运行中（PID {pid}）" if pid else "运行中") if running else "已停止"
         pause_text = "已暂停" if paused else "监听中"
 
         model = self.env.get("DEEPSEEK_MODEL", "-")
@@ -292,13 +316,13 @@ class App(tk.Tk):
                 f"每分钟上限：{self.env.get('MAX_REPLIES_PER_MINUTE', '-')} 条    "
                 f"上下文：{self.env.get('CONTEXT_MESSAGES', '-')} 条"
             ),
-            style="Ok.TLabel" if (pid and not paused and wechat == "已登录") else "Warn.TLabel",
+            style="Ok.TLabel" if (running and not paused and wechat == "已登录") else "Warn.TLabel",
         )
 
-        self.btn_start.configure(state="disabled" if pid else "normal")
-        self.btn_stop.configure(state="normal" if pid else "disabled")
-        self.btn_pause.configure(state="normal" if (pid and not paused) else "disabled")
-        self.btn_resume.configure(state="normal" if (pid and paused) else "disabled")
+        self.btn_start.configure(state="disabled" if running else "normal")
+        self.btn_stop.configure(state="normal" if running else "disabled")
+        self.btn_pause.configure(state="normal" if (running and not paused) else "disabled")
+        self.btn_resume.configure(state="normal" if (running and paused) else "disabled")
 
     def refresh_log(self) -> None:
         try:
@@ -372,16 +396,19 @@ class App(tk.Tk):
                 var = self.vars.get(key)
                 if var is None:
                     continue
+                raw = str(var.get()).strip()
+                if not raw:
+                    continue  # 留空视为使用默认值
                 if kind == "int":
                     try:
-                        int(str(var.get()).strip())
+                        int(raw)
                     except ValueError:
-                        errors.append(f"{label} 需要整数")
+                        errors.append(f"{label} 需要整数（当前填的是「{raw}」）")
                 elif kind == "float":
                     try:
-                        float(str(var.get()).strip())
+                        float(raw)
                     except ValueError:
-                        errors.append(f"{label} 需要数字")
+                        errors.append(f"{label} 需要数字（当前填的是「{raw}」）")
         return errors
 
     def _write_env(self) -> bool:
@@ -397,7 +424,8 @@ class App(tk.Tk):
                 if kind == "bool":
                     self.env.set(key, "true" if var.get() else "false")
                 else:
-                    self.env.set(key, str(var.get()))
+                    value = str(var.get()).strip() or DEFAULTS.get(key, "")
+                    self.env.set(key, value)
         try:
             self.env.save()
         except OSError as exc:

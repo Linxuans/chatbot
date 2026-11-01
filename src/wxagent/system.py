@@ -31,6 +31,20 @@ def is_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
+def gateway_mutex_held(name: str = "wxagent-uia-gateway") -> bool:
+    """直接探测单实例互斥体是否存在——比 pid 文件可靠。"""
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, name)
+    exists = kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+    if handle:
+        kernel32.CloseHandle(handle)
+    return exists
+
+
+def gateway_running() -> bool:
+    return gateway_pid() is not None or gateway_mutex_held()
+
+
 def gateway_pid() -> int | None:
     try:
         pid = int(PID_FILE.read_text(encoding="utf-8").strip())
@@ -72,8 +86,9 @@ def wechat_state() -> str:
 
 def start_gateway() -> tuple[bool, str]:
     """以无控制台方式启动网关，等待 pid 文件出现。"""
-    if gateway_pid():
-        return True, "网关已在运行"
+    if gateway_running():
+        pid = gateway_pid()
+        return True, (f"网关已在运行（PID {pid}）" if pid else "网关已在运行")
     pythonw = PROJECT_ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if not pythonw.is_file():
         return False, f"找不到 {pythonw}"

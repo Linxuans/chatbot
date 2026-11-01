@@ -6,4 +6,4 @@
     core_api.py 把核心暴露成 HTTP 服务，供 Docker 部署
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
