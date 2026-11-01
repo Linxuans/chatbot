@@ -17,3 +17,6 @@ logs/
 .tmp/
 .pipcache/
 .pipdl/
+# 打包产物（用 scripts/build-gui.ps1 重新生成）
+dist/
+build/

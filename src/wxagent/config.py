@@ -12,10 +12,29 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+def _detect_project_root() -> Path:
+    """定位项目根目录。
+
+    - 源码运行：直接按 __file__ 推算
+    - 打包成 exe：__file__ 在临时解包目录里，必须按 exe 位置算；
+      exe 被搬到别处时，向上几级找带 .env / run.py 的目录
+    """
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parents[2]
+
+    base = Path(sys.executable).resolve().parent
+    for candidate in (base, *base.parents):
+        if (candidate / ".env").is_file() or (candidate / "run.py").is_file():
+            return candidate
+    return base
+
+
+PROJECT_ROOT = _detect_project_root()
 
 # 存在这个文件时，网关不碰微信窗口（用于手动切账号/关窗等操作）
 PAUSE_FLAG = PROJECT_ROOT / "data" / "pause.flag"
+# 网关进程 pid，供 GUI 判断运行状态
+PID_FILE = PROJECT_ROOT / "data" / "gateway.pid"
 
 
 def _load_dotenv() -> None:

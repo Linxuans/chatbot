@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from wxagent.agent import AgentService, IncomingMessage  # noqa: E402
-from wxagent.config import PAUSE_FLAG, Settings, setup_logging  # noqa: E402
+from wxagent.config import PAUSE_FLAG, PID_FILE, Settings, setup_logging  # noqa: E402
 
 log = logging.getLogger("wxagent.run")
 
@@ -116,12 +117,19 @@ def run_uia(cfg: Settings) -> None:
         allowed_chats=cfg.allowed_rooms,
     )
     gateway.start()
+
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
     try:
         gateway.run_forever()
     except KeyboardInterrupt:
         log.info("收到中断，正在退出…")
     finally:
         gateway.stop()
+        try:
+            PID_FILE.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def run_pause(cfg: Settings) -> None:

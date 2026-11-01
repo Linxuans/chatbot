@@ -28,6 +28,12 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 父子命令行相同。只杀启动器会留下子进程，累积多了会出现多个实例抢同一个微信窗口，
 表现就是「有时不回」「回了又撤回」。
 
+## 一点五、桌面控制台
+
+`dist\WxAgentGUI.exe` 把启停/暂停/配置都做成了界面，等价于下面的命令。
+实现：`src/wxagent/gui.py`（Tkinter）+ `envfile.py`（读写 .env）+ `system.py`（进程/微信状态）。
+重新打包：`scripts/build-gui.ps1`。改界面后必须重新打包，exe 不会自动更新。
+
 ## 二、暂停 / 恢复（手动操作微信前必做）
 
 网关每 3 秒会还原被最小化/隐藏的窗口，所以想关窗、切账号、手动点微信之前，
