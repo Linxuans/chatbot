@@ -28,6 +28,7 @@ MAX_CHUNKS = 4
 HELP_TEXT = (
     "我在，直接 @我 问就行。\n"
     "可用命令（都是 @我 后接命令）：\n"
+    "· /members 看本群成员\n"
     "· /reset 清空本群的对话记忆\n"
     "· /status 看我的运行状态\n"
     "· /help 看这条说明"
@@ -67,6 +68,8 @@ class AgentService:
         self.memory = Memory(self.store, cfg)
         self.llm = llm or LLM(cfg)
         self.cooldown = Cooldown(cfg.cooldown_seconds, cfg.max_replies_per_minute)
+        # 由网关注入：读取群成员的能力（平台相关）
+        self.member_provider = None
         self.bot_name = cfg.bot_names[0] if cfg.bot_names else "小助手"
 
     # ---------------------------------------------------------------- 身份
@@ -249,6 +252,15 @@ class AgentService:
 
         if cmd in {"help", "帮助", "?"}:
             return HELP_TEXT
+
+        if cmd in {"members", "成员", "群成员", "who"}:
+            if not self.member_provider:
+                return "当前接入方式不支持读取群成员。"
+            names = self.member_provider(msg.chat_id)
+            if not names:
+                return "这个群没读到成员（可能是单聊，或成员列表没加载出来）。"
+            listing = "、".join(names)
+            return f"本群共 {len(names)} 人：{listing}"
 
         if cmd in {"status", "状态"}:
             stats = self.store.stats()

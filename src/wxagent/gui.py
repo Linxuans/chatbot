@@ -303,13 +303,20 @@ class App(tk.Tk):
         wechat = wechat_state()
 
         gateway_text = (f"运行中（PID {pid}）" if pid else "运行中") if running else "已停止"
-        pause_text = "已暂停" if paused else "监听中"
+        # 机器人状态必须由「进程是否在跑」推导，不能只看暂停标志，
+        # 否则停止网关后仍显示「监听中」，看着像没停
+        if not running:
+            bot_text = "已离线"
+        elif paused:
+            bot_text = "已暂停"
+        else:
+            bot_text = "监听中"
 
         model = self.env.get("DEEPSEEK_MODEL", "-")
         search = "开" if self.env.get("ENABLE_WEB_SEARCH", "true").lower() in {"1", "true", "yes", "on"} else "关"
         self.lbl_info.configure(
             text=(
-                f"网关：{gateway_text}    微信：{wechat}    机器人：{pause_text}\n"
+                f"网关：{gateway_text}    微信：{wechat}    机器人：{bot_text}\n"
                 f"模型：{model}    联网搜索：{search}    "
                 f"触发方式：{self.env.get('TRIGGER_MODE', 'at')}\n"
                 f"冷却：{self.env.get('COOLDOWN_SECONDS', '-')} 秒    "

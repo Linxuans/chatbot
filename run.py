@@ -116,6 +116,8 @@ def run_uia(cfg: Settings) -> None:
         poll_interval=cfg.uia_poll_interval,
         allowed_chats=cfg.allowed_rooms,
     )
+    # 把「读群成员」的能力交给核心：核心只管命令，具体怎么读由网关决定
+    service.member_provider = gateway.group_members
     gateway.start()
 
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)

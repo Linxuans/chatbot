@@ -364,6 +364,63 @@ class UiaGateway(BaseGateway):
                 texts.append(content)
         return texts[-MAX_TEXT_WINDOW:]
 
+    # ---------------------------------------------------------------- 群成员
+    def group_members(self, chat_id: str) -> list[str]:
+        """读取群成员昵称。
+
+        思路：在输入框敲一个 @ 会弹出成员选择浮层，里面是标准的 ListItemControl，
+        Name 就是昵称。读完把输入清空即可，不会发出消息。
+        """
+        if not self._open_chat(chat_id):
+            log.warning("读取群成员失败：打不开会话 %s", chat_id)
+            return []
+
+        edit = self._window.EditControl(ClassName=INPUT_FIELD_CLASS)
+        if not edit.Exists(2):
+            return []
+
+        try:
+            # 控件级 SendKeys 会先把焦点设到输入框；
+            # auto.SendKeys 发给前台窗口，微信不在前台时按键会丢
+            edit.SendKeys("{Ctrl}a", waitTime=0.05)
+            edit.SendKeys("{Delete}", waitTime=0.05)
+            edit.SendKeys("@", waitTime=0.1)
+            time.sleep(1.4)  # 等浮层渲染
+
+            popover = self._window.Control(ClassName="mmui::XPopover")
+            names: list[str] = []
+            if popover.Exists(1.5):
+                collected: list[str] = []
+
+                def collect(ctrl, depth: int = 0) -> None:
+                    if depth > 4 or len(collected) > 300:
+                        return
+                    try:
+                        if ctrl.ControlTypeName in ("ListItemControl", "TextControl"):
+                            text = (ctrl.Name or "").strip()
+                            if text and text not in collected:
+                                collected.append(text)
+                        for child in ctrl.GetChildren():
+                            collect(child, depth + 1)
+                    except Exception:
+                        return
+
+                collect(popover)
+                names = [n for n in collected if n not in {"所有人", "@所有人", "搜索"}]
+            log.info("群 %s 成员数：%d", chat_id, len(names))
+            return names
+        except Exception:
+            log.exception("读取群成员异常")
+            return []
+        finally:
+            # 关掉浮层并清空输入，避免误发
+            try:
+                edit.SendKeys("{Esc}", waitTime=0.05)
+                edit.SendKeys("{Ctrl}a", waitTime=0.05)
+                edit.SendKeys("{Delete}", waitTime=0.05)
+            except Exception:
+                log.debug("清理输入框失败", exc_info=True)
+
     # ---------------------------------------------------------------- 发送
     def _input_value(self) -> str:
         try:
@@ -386,12 +443,12 @@ class UiaGateway(BaseGateway):
                 return False
 
             edit.Click(simulateMove=True)
-            time.sleep(0.15)
-            auto.SendKeys("{Ctrl}a", waitTime=0.05)
-            auto.SendKeys("{Delete}", waitTime=0.05)
+            time.sleep(0.10)
+            edit.SendKeys("{Ctrl}a", waitTime=0.05)
+            edit.SendKeys("{Delete}", waitTime=0.05)
 
             self._set_clipboard(text)
-            auto.SendKeys("{Ctrl}v", waitTime=0.08)
+            edit.SendKeys("{Ctrl}v", waitTime=0.08)
             time.sleep(0.3)
 
             if self._input_value() == "":
@@ -406,7 +463,7 @@ class UiaGateway(BaseGateway):
                 except Exception:
                     log.debug("点击发送按钮失败", exc_info=True)
             if self._input_value() != "":
-                auto.SendKeys("{Enter}", waitTime=0.05)
+                edit.SendKeys("{Enter}", waitTime=0.05)
                 time.sleep(0.35)
             if self._input_value() != "":
                 log.error("发送后输入框仍有内容，判定发送失败")

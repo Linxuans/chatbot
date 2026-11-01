@@ -194,3 +194,32 @@ def test_memory_rolls_up_summary(tmp_path):
     assert last_rowid == 3
     # 没攒够就不该再压缩
     assert memory.maybe_summarize("room1", FakeLLM("再来一次")) is False
+
+def test_members_command_uses_provider(tmp_path):
+    service = build(tmp_path)
+    service.member_provider = lambda chat_id: ["张三", "李四", "王五"]
+    replies = service.handle(
+        IncomingMessage(chat_id="room1", content="@小助手 /members", sender_name="A", is_at_me=True, msg_id="mem1")
+    )
+    assert len(replies) == 1
+    assert "3 人" in replies[0].text
+    assert "张三" in replies[0].text and "王五" in replies[0].text
+    assert service.llm.calls == []  # 命令不该走模型
+
+
+def test_members_command_without_provider(tmp_path):
+    service = build(tmp_path)
+    replies = service.handle(
+        IncomingMessage(chat_id="room1", content="@小助手 /成员", sender_name="A", is_at_me=True, msg_id="mem2")
+    )
+    assert len(replies) == 1
+    assert "不支持" in replies[0].text
+
+
+def test_members_command_empty_result(tmp_path):
+    service = build(tmp_path)
+    service.member_provider = lambda chat_id: []
+    replies = service.handle(
+        IncomingMessage(chat_id="room1", content="@小助手 /群成员", sender_name="A", is_at_me=True, msg_id="mem3")
+    )
+    assert "没读到成员" in replies[0].text

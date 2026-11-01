@@ -227,6 +227,7 @@ docker compose logs -f
 
 | 命令 | 作用 |
 | --- | --- |
+| `@机器人 /members` | 读取本群成员昵称 |
 | `@机器人 /help` | 看用法 |
 | `@机器人 /status` | 看模型、会话数、触发方式 |
 | `@机器人 /reset` | 清空本群记忆（`ADMIN_WXIDS` 为空时人人可用） |
